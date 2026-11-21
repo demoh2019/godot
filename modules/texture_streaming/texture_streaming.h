@@ -431,6 +431,9 @@ private:
 	// All cross-thread reads and writes are atomic.
 	std::atomic<uint8_t> effective_detail_prefetch_mips{ 0 };
 	std::atomic<bool> adaptive_detail_prefetch_enabled{ false };
+	// Unreal MemoryMargin-style reserve for transient non-streaming VRAM.
+	// Atomic: quality presets run on the main thread, fitting on the worker.
+	std::atomic<uint8_t> safety_margin_percent{ 0 };
 	uint32_t setting_budget_mb_override = UINT32_MAX;
 	uint8_t setting_min_lod_override = UINT8_MAX;
 	uint8_t setting_max_lod_override = UINT8_MAX;
@@ -533,7 +536,9 @@ private:
 	std::atomic<uint32_t> streaming_budget_reduction_steps{ 0 };
 	std::atomic<uint64_t> streaming_requested_bytes{ 0 };
 	std::atomic<uint64_t> streaming_fitted_bytes{ 0 };
-	std::atomic<uint64_t> streaming_budget_bytes{ 0 };
+	std::atomic<uint64_t> streaming_budget_bytes{ 0 }; // Usable fitted pool after reserve.
+	std::atomic<uint64_t> streaming_configured_budget_bytes{ 0 }; // Gross allowed pool.
+	std::atomic<uint64_t> streaming_safety_reserve_bytes{ 0 }; // Held back from fitting.
 
 	void _feedback_handle_data(const PackedByteArray &p_array, RID p_buffer);
 
@@ -663,6 +668,18 @@ public:
 	uint64_t get_streaming_requested_bytes() const { return streaming_requested_bytes.load(std::memory_order_relaxed); }
 	uint64_t get_streaming_fitted_bytes() const { return streaming_fitted_bytes.load(std::memory_order_relaxed); }
 	uint64_t get_streaming_budget_bytes() const { return streaming_budget_bytes.load(std::memory_order_relaxed); }
+	uint64_t get_streaming_configured_budget_bytes() const { return streaming_configured_budget_bytes.load(std::memory_order_relaxed); }
+	uint64_t get_streaming_safety_reserve_bytes() const { return streaming_safety_reserve_bytes.load(std::memory_order_relaxed); }
+
+	// User-visible setting affects only streamed mip fitting when a memory
+	// budget is enabled. 0 preserves old behavior, max 25% protects quality.
+	void set_safety_margin_percent(int p_percent) {
+		const int bounded = CLAMP(p_percent, 0, 25);
+		safety_margin_percent.store(uint8_t(bounded), std::memory_order_relaxed);
+	}
+	int get_safety_margin_percent() const {
+		return int(safety_margin_percent.load(std::memory_order_relaxed));
+	}
 
 	// Properties
 	void set_detail_prefetch_mips(int p_mips) {

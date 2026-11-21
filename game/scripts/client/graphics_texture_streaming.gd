@@ -7,6 +7,10 @@ extends RefCounted
 # Ultra opts into one more sharp resident mip when the VRAM fitter permits.
 # All premium I/O uploads remain limited to a two-mip improvement step.
 const PREFETCH_MIPS := [0, 0, 1, 2]
+# Unreal-style safety pool: reserve a little streamed-texture budget for
+# transient render targets/materials when the custom native budget is active.
+# Performance deliberately has no extra reserve; none in Compatibility.
+const SAFETY_MARGIN_PERCENT := [0, 4, 6, 8]
 
 
 static func prefetch_mips(level: int, method: String) -> int:
@@ -23,6 +27,12 @@ static func adaptive_prefetch_enabled(level: int, method: String) -> bool:
 	return method == "forward_plus" and prefetch_mips(level, method) > 0
 
 
+static func safety_margin_percent(level: int, method: String) -> int:
+	if method != "forward_plus":
+		return 0
+	return SAFETY_MARGIN_PERCENT[clampi(level, 0, SAFETY_MARGIN_PERCENT.size() - 1)]
+
+
 static func apply(level: int, method: String) -> void:
 	# Stock Godot and Compatibility builds must still run this game.
 	if not Engine.has_singleton("TextureStreaming"):
@@ -34,6 +44,10 @@ static func apply(level: int, method: String) -> void:
 	if server != null and server.has_method("set_adaptive_detail_prefetch_enabled"):
 		server.call("set_adaptive_detail_prefetch_enabled",
 			adaptive_prefetch_enabled(level, method))
+	# Does nothing on stock Godot or when engine memory fitting is disabled.
+	# Settings apply on preset changes; feedback worker reads one atomic byte.
+	if server != null and server.has_method("set_safety_margin_percent"):
+		server.call("set_safety_margin_percent", safety_margin_percent(level, method))
 
 
 ## Native equivalent of Unreal STAT STREAMING, exposed as real Godot
@@ -48,6 +62,8 @@ const PROFILER_METRICS := {
 	&"Albion/TextureStreamingRequestedBytes": &"get_streaming_requested_bytes",
 	&"Albion/TextureStreamingFittedBytes": &"get_streaming_fitted_bytes",
 	&"Albion/TextureStreamingBudgetBytes": &"get_streaming_budget_bytes",
+	&"Albion/TextureStreamingConfiguredBudgetBytes": &"get_streaming_configured_budget_bytes",
+	&"Albion/TextureStreamingSafetyReserveBytes": &"get_streaming_safety_reserve_bytes",
 	&"Albion/TextureStreamingResidentBytes": &"get_memory_budget_bytes_used",
 }
 

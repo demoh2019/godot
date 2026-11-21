@@ -17,6 +17,19 @@ func run(t) -> void:
 	t.eq(Streaming.prefetch_mips(3, "forward_plus"), 2, "Ultra prefetches two sharper mips where memory permits")
 	t.eq(Streaming.prefetch_mips(-99, "forward_plus"), 0, "negative quality clamps")
 	t.eq(Streaming.prefetch_mips(99, "forward_plus"), 2, "high quality clamps")
+	t.current = "Unreal-style VRAM safety pool is isolated from quality defaults"
+	for renderer in ["gl_compatibility", "mobile", "unknown"]:
+		for level in 4:
+			t.eq(Streaming.safety_margin_percent(level, renderer), 0,
+				"non-Forward+ never reserves streamed VRAM")
+	for level in 4:
+		t.eq(Streaming.safety_margin_percent(level, "forward_plus"),
+			[0, 4, 6, 8][level],
+			"each preset reserves its bounded margin only on Forward+")
+	t.eq(Streaming.safety_margin_percent(-9, "forward_plus"), 0,
+		"invalid negative tier clamps")
+	t.eq(Streaming.safety_margin_percent(50, "forward_plus"), 8,
+		"oversized tier clamps to highest approved reserve")
 	t.current = "adaptive prefetch only on Forward+ detail tiers"
 	for tier in 4:
 		t.eq(Streaming.adaptive_prefetch_enabled(tier, "forward_plus"), tier >= 2,
@@ -35,6 +48,25 @@ func run(t) -> void:
 			if server.has_method("is_adaptive_detail_prefetch_enabled"):
 				t.eq(bool(server.call("is_adaptive_detail_prefetch_enabled")), true,
 					"Ultra enables native memory-pressure admission")
+			if server.has_method("get_safety_margin_percent"):
+				t.eq(int(server.call("get_safety_margin_percent")), 8,
+					"Ultra reserves eight percent of the native texture pool")
+				server.call("set_safety_margin_percent", -200)
+				t.eq(int(server.call("get_safety_margin_percent")), 0,
+					"native setter bounds negative reserve to zero")
+				server.call("set_safety_margin_percent", 900)
+				t.eq(int(server.call("get_safety_margin_percent")), 25,
+					"native setter caps reserve at 25 percent")
+				server.call("set_safety_margin_percent", 8)
+			if server.has_method("get_streaming_configured_budget_bytes") \
+					and server.has_method("get_streaming_safety_reserve_bytes"):
+				var raw_pool: int = int(server.call("get_streaming_configured_budget_bytes"))
+				var active_pool: int = int(server.call("get_streaming_budget_bytes"))
+				var safety_reserve: int = int(server.call("get_streaming_safety_reserve_bytes"))
+				t.check(raw_pool >= active_pool and active_pool >= 0,
+					"usable streamed pool never exceeds configured pool")
+				t.eq(raw_pool - active_pool, safety_reserve,
+					"native profiler exposes exact last-pass reserve accounting")
 				if server.has_method("get_effective_detail_prefetch_mips"):
 					var effective: int = int(server.call("get_effective_detail_prefetch_mips"))
 					t.check(effective >= 0 and effective <= 2,
@@ -45,6 +77,9 @@ func run(t) -> void:
 			if server.has_method("is_adaptive_detail_prefetch_enabled"):
 				t.eq(bool(server.call("is_adaptive_detail_prefetch_enabled")), false,
 					"downgrade disables native adaptive prefetch")
+			if server.has_method("get_safety_margin_percent"):
+				t.eq(int(server.call("get_safety_margin_percent")), 0,
+					"Performance resets native safety pool to legacy zero")
 				if server.has_method("get_effective_detail_prefetch_mips"):
 					t.eq(int(server.call("get_effective_detail_prefetch_mips")), 0,
 						"no speculative mips left when Performance is selected")

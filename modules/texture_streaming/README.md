@@ -19,7 +19,9 @@ getters on the existing `Engine.get_singleton("TextureStreaming")` object:
 | `get_streaming_budget_reduction_steps()` | Individual mip-level degradation steps performed by the memory-budget fitter on the last pass (not the count of affected textures) |
 | `get_streaming_requested_bytes()` | Initial target mip bytes **before** budget reductions, including temporary retained high-detail mips from previous feedback |
 | `get_streaming_fitted_bytes()` | Target mip bytes **after** the memory fitter |
-| `get_streaming_budget_bytes()` | Budget allowed in bytes during the last pass; **0 means budget fitting is disabled**, not zero VRAM |
+| `get_streaming_budget_bytes()` | **Usable** budget after reserving an optional safety margin; **0 means budget fitting is disabled**, not zero VRAM |
+| `get_streaming_configured_budget_bytes()` | Gross configured budget before the safety pool is subtracted |
+| `get_streaming_safety_reserve_bytes()` | Last-pass headroom reserved for transient non-streaming allocations (not a physical GPU reservation) |
 | `get_memory_budget_bytes_used()` | Estimated current resident streamed mip bytes; existing Cgame API |
 
 The metrics **do not claim to measure actual GPU driver allocations, true I/O
@@ -38,10 +40,10 @@ if Engine.has_singleton("TextureStreaming"):
             " textures awaiting their approved mip")
 ```
 
-Albion After's actual `online_main.gd` registers seven custom monitors
+Albion After's actual `online_main.gd` registers nine custom monitors
 (`Albion/TextureStreamingActive`, `...Pending`,
 `...BudgetMipCuts`, `...RequestedBytes`, `...FittedBytes`,
-`...BudgetBytes`, `...ResidentBytes`) in Godot's **Performance**
+`...BudgetBytes`, `...ConfiguredBudgetBytes`, `...SafetyReserveBytes`, `...ResidentBytes`) in Godot's **Performance**
 profiler when supported by the installed Cgame binary. They are removed on
 game-client exit, and registration is idempotent. On stock Godot or older
 custom engines, unsupported counters are omitted without breaking gameplay.
@@ -63,3 +65,18 @@ custom engines, unsupported counters are omitted without breaking gameplay.
 This instruments existing texture work rather than changing mip fit decisions.
 To assess actual performance, capture a trace or compare streaming profiles
 in a representative scene.
+
+## Memory safety pool (Unreal MemoryMargin-inspired)
+
+The live texture fitter can now hold back an optional **0..25%**
+portion of the configured pool before choosing texture mip quality
+and speculative prefetch. The default reserve is zero, keeping
+previous engine behavior identical. Albion After opts into small
+Forward+ reserves of 0/4/6/8% on Performance/Balanced/High/Ultra
+when the streaming memory budget is enabled.
+
+The same worker publishes gross/usable/reserved pool telemetry.
+See [SAFETY_POOL.md](SAFETY_POOL.md) for the native API, integer
+overflow guards, compatibility behavior and CI tests. This feature
+cannot prevent arbitrary GPU OOM or measure actual driver VRAM
+allocations; validate a representative scene with GPU profiling.

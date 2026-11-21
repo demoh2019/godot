@@ -34,6 +34,7 @@
 
 #ifdef TESTS_ENABLED
 #include "tests/test_adaptive_prefetch_policy.h"
+#include "tests/test_streaming_safety_margin_policy.h"
 #include "tests/test_streaming_stats_policy.h"
 #endif
 

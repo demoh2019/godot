@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "texture_streaming.h"
+#include "streaming_safety_margin_policy.h"
 #include "feedback_buffer_policy.h"
 #include "streaming_stats_policy.h"
 
@@ -141,6 +142,12 @@ void TextureStreaming::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_streaming_requested_bytes"), &TextureStreaming::get_streaming_requested_bytes);
 	ClassDB::bind_method(D_METHOD("get_streaming_fitted_bytes"), &TextureStreaming::get_streaming_fitted_bytes);
 	ClassDB::bind_method(D_METHOD("get_streaming_budget_bytes"), &TextureStreaming::get_streaming_budget_bytes);
+	ClassDB::bind_method(D_METHOD("get_streaming_configured_budget_bytes"), &TextureStreaming::get_streaming_configured_budget_bytes);
+	ClassDB::bind_method(D_METHOD("get_streaming_safety_reserve_bytes"), &TextureStreaming::get_streaming_safety_reserve_bytes);
+	ClassDB::bind_method(D_METHOD("set_safety_margin_percent", "percent"), &TextureStreaming::set_safety_margin_percent);
+	ClassDB::bind_method(D_METHOD("get_safety_margin_percent"), &TextureStreaming::get_safety_margin_percent);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "safety_margin_percent", PROPERTY_HINT_RANGE, "0,25,1"),
+			"set_safety_margin_percent", "get_safety_margin_percent");
 
 	ClassDB::bind_method(D_METHOD("flush_texture_streaming"), &TextureStreaming::flush_texture_streaming);
 
@@ -352,6 +359,8 @@ void TextureStreaming::_stop_streaming() {
 	streaming_requested_bytes.store(0, std::memory_order_relaxed);
 	streaming_fitted_bytes.store(0, std::memory_order_relaxed);
 	streaming_budget_bytes.store(0, std::memory_order_relaxed);
+	streaming_configured_budget_bytes.store(0, std::memory_order_relaxed);
+	streaming_safety_reserve_bytes.store(0, std::memory_order_relaxed);
 
 	// Clean up feedback buffer pool. The MaterialFeedbackBuffer destructor
 	// schedules RD resource cleanup on the render thread via call_on_render_thread.
@@ -708,7 +717,15 @@ void TextureStreaming::_feedback_buffer_process(uint64_t p_ticks_msec) {
 	// Phase 2: Budget fitting - iteratively reduce textures until within memory budget.
 	uint64_t assigned_bytes = total_requested_bytes;
 	uint32_t budget_reduction_steps = 0;
-	const uint64_t budget_bytes = setting_budget_enabled ? uint64_t(_get_memory_budget_mb()) * 1024ull * 1024ull : 0;
+	const uint64_t configured_budget_bytes = setting_budget_enabled ?
+			uint64_t(_get_memory_budget_mb()) * 1024ull * 1024ull : 0;
+	// A reserved portion of the configured pool is unavailable to new mip
+	// allocations, including speculative detail prefetch. The existing
+	// +5/-5% fit hysteresis remains unchanged and operates on usable bytes.
+	// With the default 0% margin all previous fitting decisions are identical.
+	const uint64_t reserve_bytes = TextureStreamingSafetyMarginPolicy::reserve_bytes(
+			configured_budget_bytes, safety_margin_percent.load(std::memory_order_relaxed));
+	const uint64_t budget_bytes = configured_budget_bytes - reserve_bytes;
 	// Adapt only speculative sharper-mip prefetch. The existing memory fitter
 	// retains final authority over fit_mip, I/O queues and total pool usage.
 	const uint8_t desired_prefetch = detail_prefetch_mips.load(std::memory_order_relaxed);
@@ -824,6 +841,8 @@ void TextureStreaming::_feedback_buffer_process(uint64_t p_ticks_msec) {
 	streaming_requested_bytes.store(total_requested_bytes, std::memory_order_relaxed);
 	streaming_fitted_bytes.store(assigned_bytes, std::memory_order_relaxed);
 	streaming_budget_bytes.store(budget_bytes, std::memory_order_relaxed);
+	streaming_configured_budget_bytes.store(configured_budget_bytes, std::memory_order_relaxed);
+	streaming_safety_reserve_bytes.store(reserve_bytes, std::memory_order_relaxed);
 }
 
 void TextureStreaming::_texture_reload_thread_func(void *p_udata) {

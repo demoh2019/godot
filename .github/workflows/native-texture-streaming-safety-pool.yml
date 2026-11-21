@@ -1,0 +1,88 @@
+name: Native texture streaming Safety Pool and Albion After
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/texture_streaming/**'
+      - 'game/scripts/client/graphics_texture_streaming.gd'
+      - 'game/tests/test_graphics_texture_streaming.gd'
+      - 'tests/scene/test_texture_streaming_safety_pool_contract.py'
+      - '.github/workflows/native-texture-streaming-safety-pool.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/texture_streaming/**'
+      - 'game/scripts/client/graphics_texture_streaming.gd'
+      - 'game/tests/test_graphics_texture_streaming.gd'
+      - 'tests/scene/test_texture_streaming_safety_pool_contract.py'
+      - '.github/workflows/native-texture-streaming-safety-pool.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source contracts are not native test results
+        run: python3 -m unittest tests/scene/test_texture_streaming_safety_pool_contract.py -v
+
+  native-game:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: C++ native streamed texture Safety Pool doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*TextureStreaming*" --no-colors 2>&1 | tee safety-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' safety-native.log; then exit 1; fi
+      - name: Import Albion After with native texture streaming singleton
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee safety-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' safety-import.log; then exit 1; fi
+      - name: Focused in-game graphics texture streaming regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_adaptive_texture_prefetch.gd 2>&1 | tee safety-game.log
+          grep -E '^ADAPTIVE TEX PREFETCH TOTAL: [0-9]+ checks, 0 failures$' safety-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' safety-game.log; then exit 1; fi
+      - name: Full Albion After headless regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee safety-full.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' safety-full.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' safety-full.log; then exit 1; fi
+      - name: Upload native engine/game regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-texture-streaming-safety-pool
+          if-no-files-found: ignore
+          path: |
+            safety-native.log
+            safety-import.log
+            safety-game.log
+            safety-full.log
