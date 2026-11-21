@@ -35,11 +35,7 @@ jobs:
           set -euo pipefail
           ./godot --headless --path demo/days_after --editor --import --quit 2>&1 | tee import.log
           ./godot --headless --path demo/days_after --script res://smoke_test.gd 2>&1 | tee smoke.log
-          grep -Eq '^PASS: Days After .*physics frames\. smoke.log
-          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Failed loading resource' import.log smoke.log; then
-            exit 1
-          fi
- smoke.log
+          grep -Eq '^PASS: Days After .*physics frames\.' smoke.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Failed loading resource' import.log smoke.log; then
             exit 1
           fi
