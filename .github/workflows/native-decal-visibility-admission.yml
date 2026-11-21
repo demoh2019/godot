@@ -1,0 +1,96 @@
+name: Native decal visibility admission and Albion
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/decal_visibility_budget/**'
+      - 'game/scripts/client/decal_visibility_policy.gd'
+      - 'game/scripts/client/impact_decals.gd'
+      - 'game/scripts/client/blood_decals.gd'
+      - 'game/tests/test_decal_visibility_admission.gd'
+      - 'game/tests/run_decal_visibility_admission.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_decal_visibility_admission_contract.py'
+      - '.github/workflows/native-decal-visibility-admission.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/decal_visibility_budget/**'
+      - 'game/scripts/client/decal_visibility_policy.gd'
+      - 'game/scripts/client/impact_decals.gd'
+      - 'game/scripts/client/blood_decals.gd'
+      - 'game/tests/test_decal_visibility_admission.gd'
+      - 'game/tests/run_decal_visibility_admission.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_decal_visibility_admission_contract.py'
+      - '.github/workflows/native-decal-visibility-admission.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate source contracts
+        run: python3 -m unittest tests/scene/test_decal_visibility_admission_contract.py -v
+
+  native-game:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native decal admission doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*DecalVisibilityAdmission3D*" --no-colors 2>&1 | tee decal-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' decal-native.log; then exit 1; fi
+      - name: Import Albion After assets and scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee decal-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' decal-import.log; then exit 1; fi
+      - name: Focused decal projection game tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_decal_visibility_admission.gd 2>&1 | tee decal-game.log
+          grep -E '^DECAL ADMISSION TOTAL: [0-9]+ checks, 0 failures$' decal-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' decal-game.log; then exit 1; fi
+      - name: Full Albion After game regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee decal-full.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' decal-full.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' decal-full.log; then exit 1; fi
+      - name: Publish regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-decal-visibility-admission
+          if-no-files-found: ignore
+          path: |
+            decal-native.log
+            decal-import.log
+            decal-game.log
+            decal-full.log

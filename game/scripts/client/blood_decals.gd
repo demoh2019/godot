@@ -3,6 +3,9 @@ extends Node3D
 ## procedurally generated splat onto terrain under hits, then fade out. Decals
 ## need Forward+/Mobile; Compatibility and Performance skip them entirely.
 
+const DecalVisibility = preload("res://scripts/client/decal_visibility_policy.gd")
+const EngineFeatures = preload("res://scripts/client/engine_features.gd")
+
 const POOL_SIZE := 32
 const LIFETIME := 24.0
 const FADE := 4.0
@@ -11,6 +14,7 @@ var _pool: Array[Decal] = []
 var _age: Array[float] = []
 var _next := 0
 static var _splat_tex: Texture2D
+var _native_visibility: Object = EngineFeatures.make("DecalVisibilityAdmission3D")
 
 
 ## Splats per hit for a tier/renderer (0 = off).
@@ -78,14 +82,20 @@ func _ready() -> void:
 func splat(world, x: float, z: float, zombie: bool, damage: float) -> void:
 	if world == null:
 		return
+	var s: float = clampf(0.6 + damage / 40.0, 0.6, 1.6)
+	var ground: float = float(world.height_at(x, z))
+	# Use the same 35m + 10m native distance fade and exact impact size.
+	# Rejected distant hits never consume the shared 32-slot ring.
+	if not DecalVisibility.can_project(self, Vector3(x, ground + 0.2, z),
+			1.3 * s, 45.0, 3.0, _native_visibility):
+		return
 	var d := _pool[_next]
 	_age[_next] = 0.0
 	_next = (_next + 1) % POOL_SIZE
-	var s: float = clampf(0.6 + damage / 40.0, 0.6, 1.6)
 	d.size = Vector3(1.3 * s, 1.2, 1.3 * s)
 	d.modulate = tint(zombie)
 	d.albedo_mix = 0.9
-	d.position = Vector3(x + randf_range(-0.3, 0.3), float(world.height_at(x, z)) + 0.2, z + randf_range(-0.3, 0.3))
+	d.position = Vector3(x + randf_range(-0.3, 0.3), ground + 0.2, z + randf_range(-0.3, 0.3))
 	d.rotation.y = randf() * TAU
 	d.visible = true
 
@@ -106,13 +116,19 @@ func _process(delta: float) -> void:
 func scorch(world, x: float, z: float, radius: float) -> void:
 	if world == null:
 		return
+	var s: float = clampf(radius, 1.0, 6.0)
+	var ground: float = float(world.height_at(x, z))
+	# Large scorch projection volumes remain visible up to their radius
+	# beyond the fade edge; tiny far-away splats do not take live slots.
+	if not DecalVisibility.can_project(self, Vector3(x, ground + 0.4, z),
+			s * 1.6, 45.0, 3.0, _native_visibility):
+		return
 	var d := _pool[_next]
 	_age[_next] = 0.0
 	_next = (_next + 1) % POOL_SIZE
-	var s: float = clampf(radius, 1.0, 6.0)
 	d.size = Vector3(s * 1.6, 2.0, s * 1.6)
 	d.modulate = Color(0.05, 0.045, 0.04)
 	d.albedo_mix = 0.9
-	d.position = Vector3(x, float(world.height_at(x, z)) + 0.4, z)
+	d.position = Vector3(x, ground + 0.4, z)
 	d.rotation.y = randf() * TAU
 	d.visible = true

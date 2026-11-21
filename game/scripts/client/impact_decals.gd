@@ -4,6 +4,8 @@ extends Node3D
 ## A fixed ring buffer per quality tier bounds GPU cost; oldest decals are reused.
 
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const DecalVisibility = preload("res://scripts/client/decal_visibility_policy.gd")
+const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 const BUDGET := [0, 24, 48, 96] # Low, Medium, High, Ultra.
 const LIFETIME := 40.0
 const FADE := 6.0
@@ -15,6 +17,7 @@ var _clock := 0.0
 var _textures := {}
 var _level := -1
 var _method := ""
+var _native_visibility: Object = EngineFeatures.make("DecalVisibilityAdmission3D")
 
 
 static func budget(level: int) -> int:
@@ -96,6 +99,12 @@ func configure(level: int) -> void:
 ## Projects a splat onto whatever lies below `position` (terrain, floors, props).
 func splat(position: Vector3, color: Color, size: float = 1.0) -> void:
 	if _pool.is_empty():
+		return
+	# Unreal-style projected screen-size admission. Reject useless distant
+	# impacts before texture generation, RNG, pool eviction and GPU updates.
+	var current_quality: int = _level if _level >= 0 else GraphicsQuality.level()
+	if not DecalVisibility.can_project(self, position, size,
+			draw_distance(current_quality) + 12.0, 3.0, _native_visibility):
 		return
 	var key := randi() % 4
 	if not _textures.has(key):

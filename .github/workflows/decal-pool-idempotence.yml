@@ -7,6 +7,12 @@ on:
       - 'scene/3d/decal.h'
       - 'tests/scene/test_decal_cached_setters.cpp'
       - 'game/scripts/client/impact_decals.gd'
+      - 'game/scripts/client/blood_decals.gd'
+      - 'game/scripts/client/decal_visibility_policy.gd'
+      - 'game/tests/test_decal_visibility_admission.gd'
+      - 'game/tests/run_decal_visibility_admission.gd'
+      - 'modules/decal_visibility_budget/**'
+      - 'tests/scene/test_decal_visibility_admission_contract.py'
       - 'game/tests/test_impact_decal_budget.gd'
       - '.github/workflows/decal-pool-idempotence.yml'
   push:
@@ -16,6 +22,12 @@ on:
       - 'scene/3d/decal.h'
       - 'tests/scene/test_decal_cached_setters.cpp'
       - 'game/scripts/client/impact_decals.gd'
+      - 'game/scripts/client/blood_decals.gd'
+      - 'game/scripts/client/decal_visibility_policy.gd'
+      - 'game/tests/test_decal_visibility_admission.gd'
+      - 'game/tests/run_decal_visibility_admission.gd'
+      - 'modules/decal_visibility_budget/**'
+      - 'tests/scene/test_decal_visibility_admission_contract.py'
       - 'game/tests/test_impact_decal_budget.gd'
       - '.github/workflows/decal-pool-idempotence.yml'
   workflow_dispatch:
@@ -31,6 +43,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Static native decal admission contracts
+        run: python3 -m unittest tests/scene/test_decal_visibility_admission_contract.py -v
       - uses: ./.github/actions/godot-cache-restore
         with:
           cache-name: linux-decal-pool-idempotence
@@ -51,6 +65,13 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           "$BIN" --headless --test --test-case="*Repeated pooled fade values*"
+      - name: Native projected-size decal admission doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*DecalVisibilityAdmission3D*" --no-colors 2>&1 | tee decal-admission-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' decal-admission-native.log; then exit 1; fi
       - name: Headless Albion After graphics suite on native Cgame
         shell: bash
         run: |
@@ -60,6 +81,22 @@ jobs:
           timeout 300s "$BIN" --headless --path game --script res://tests/run_graphics.gd 2>&1 | tee decal-graphics-tests.log
           grep -E '^GRAPHICS TOTAL: [0-9]+ checks, 0 failures$' decal-graphics-tests.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' decal-graphics-tests.log; then exit 1; fi
+      - name: Focused native and fallback decal admission parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_decal_visibility_admission.gd 2>&1 | tee decal-admission-game.log
+          grep -E '^DECAL ADMISSION TOTAL: [0-9]+ checks, 0 failures$' decal-admission-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' decal-admission-game.log; then exit 1; fi
+      - name: Full Albion After gameplay regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee decal-admission-full.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' decal-admission-full.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' decal-admission-full.log; then exit 1; fi
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -69,3 +106,6 @@ jobs:
           path: |
             decal-import.log
             decal-graphics-tests.log
+            decal-admission-native.log
+            decal-admission-game.log
+            decal-admission-full.log

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DecalVisibilityAdmission3D" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Conservative 3D decal admission by distance and projected screen size.</brief_description>
+	<description>Provides a pure, bounded decision before allocating or recycling a temporary Decal node. Inspired by Unreal Engine decal distance bounds and screen-size fading. This class never renders, creates textures, reads the live camera or modifies physics and does not guarantee GPU time savings. The caller supplies the active perspective camera's vertical field of view and the viewport height; on orthographic or missing cameras, the game should retain its legacy behavior.</description>
+	<methods>
+		<method name="should_spawn" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="camera_position" type="Vector3" />
+			<param index="1" name="decal_position" type="Vector3" />
+			<param index="2" name="diameter_m" type="float" />
+			<param index="3" name="max_distance_m" type="float" />
+			<param index="4" name="viewport_height_px" type="float" />
+			<param index="5" name="vertical_fov_deg" type="float" />
+			<param index="6" name="min_diameter_px" type="float" default="3.0" />
+			<description>Returns false for invalid numeric inputs, decals beyond the maximum native draw distance plus their radius, or decals whose conservative perspective-projected diameter is smaller than the requested pixel threshold. Position components are bounded to 10 million units, physical diameter to 0.01–128 m, distance to 0.5–10000 m, viewport height to 32–16384 px, vertical FOV to 5–170 degrees, and minimum pixel diameter to 0–128 px. Does not test camera orientation, walls, or occlusion to preserve near marks while the camera turns.</description>
+		</method>
+	</methods>
+</class>
