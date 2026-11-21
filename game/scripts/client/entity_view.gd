@@ -61,6 +61,7 @@ var _render_time := -1.0
 # Native jitter telemetry and delay adaptation on Cgame, with 1:1 script
 # policy on official Godot. Positions/teleports stay server-authoritative.
 var _snapshot_buffer = ClassDB.instantiate("AdaptiveNetworkJitterBuffer") if ClassDB.class_exists("AdaptiveNetworkJitterBuffer") else NetworkJitterBuffer.new()
+var _rotation_smoother: Object = EngineFeatures.make("SnapshotRotationSmoothing3D")
 const INTERPOLATION_DELAY := 0.12 # Baseline for 10 server snapshots per second.
 const TELEPORT_DISTANCE := 8.0
 
@@ -849,7 +850,11 @@ func _sample(key: String) -> Array:
 			var host: Node3D = _nodes.get(key) as Node3D
 			var position: Vector3 = SnapshotSmoothing.sample_position(
 				previous, older, newer, following, k, host)
-			return [position, lerp_angle(float(older[2]), float(newer[2]), k)]
+			# UE-style simulated-proxy angular smoothing shares the trusted
+			# server snapshot history, without extrapolation or facing overshoot.
+			var yaw: float = SnapshotSmoothing.sample_yaw(
+				previous, older, newer, following, k, _rotation_smoother)
+			return [position, yaw]
 	return [history[-1][1], history[-1][2]]
 
 

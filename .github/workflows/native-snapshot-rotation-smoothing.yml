@@ -1,0 +1,95 @@
+name: Native replicated yaw smoothing and Albion
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/snapshot_rotation_smoothing/**'
+      - 'game/scripts/client/network_snapshot_smoothing.gd'
+      - 'game/scripts/client/entity_view.gd'
+      - 'game/tests/test_snapshot_rotation_smoothing.gd'
+      - 'game/tests/run_snapshot_rotation_smoothing.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_snapshot_rotation_smoothing_contract.py'
+      - '.github/workflows/native-snapshot-rotation-smoothing.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/snapshot_rotation_smoothing/**'
+      - 'game/scripts/client/network_snapshot_smoothing.gd'
+      - 'game/scripts/client/entity_view.gd'
+      - 'game/tests/test_snapshot_rotation_smoothing.gd'
+      - 'game/tests/run_snapshot_rotation_smoothing.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_snapshot_rotation_smoothing_contract.py'
+      - '.github/workflows/native-snapshot-rotation-smoothing.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate source contracts
+        run: python3 -m unittest tests/scene/test_snapshot_rotation_smoothing_contract.py -v
+
+  native-game:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native snapshot rotation doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*SnapshotRotationSmoothing3D*" --no-colors 2>&1 | tee yaw-native.log
+          grep -E 'test cases:[[:space:]]*[1-9][0-9]*' yaw-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' yaw-native.log; then exit 1; fi
+      - name: Import Albion After game assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee yaw-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' yaw-import.log; then exit 1; fi
+      - name: Focused network rotation regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_snapshot_rotation_smoothing.gd 2>&1 | tee yaw-game.log
+          grep -E '^ROTATION SMOOTHING TOTAL: [0-9]+ checks, 0 failures$' yaw-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' yaw-game.log; then exit 1; fi
+      - name: Full Albion After headless regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee yaw-full.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' yaw-full.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' yaw-full.log; then exit 1; fi
+      - name: Archive regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-snapshot-rotation-smoothing
+          if-no-files-found: ignore
+          path: |
+            yaw-native.log
+            yaw-import.log
+            yaw-game.log
+            yaw-full.log

@@ -39,25 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test.gd 2>&1 | tee days-after-smoke.log
-          grep -Eq '^PASS: Days After .*physics frames\. days-after-smoke.log
-          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' days-after-smoke.log; then exit 1; fi
-      - name: Run survivor persistence smoke
-        run: |
-          set -euo pipefail
-          timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test_saves.gd 2>&1 | tee days-after-saves.log
-          grep -F 'PASS: survivor save/load, equipment, professions, validation, atomic rejection.' days-after-saves.log
-          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' days-after-saves.log; then exit 1; fi
-      - name: Upload smoke test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: days-after-gameplay-logs
-          if-no-files-found: ignore
-          path: |
-            days-after-import.log
-            days-after-smoke.log
-            days-after-saves.log
- days-after-smoke.log
+          grep -Eq '^PASS: Days After .*physics frames\.' days-after-smoke.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' days-after-smoke.log; then exit 1; fi
       - name: Run survivor persistence smoke
         run: |

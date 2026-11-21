@@ -76,3 +76,99 @@ static func sample_position(previous: Array, older: Array, newer: Array,
 				and following_pos.distance_to(to) <= TELEPORT_DISTANCE:
 			v_to = (following_pos - from) / later_span
 	return hermite(from, to, v_from, v_to, span, alpha, host)
+
+
+## Shortest arc between two server rotations. Never extrapolates outside the
+## authoritative angular span, including the -pi/+pi seam.
+static func _yaw_delta(from_yaw: float, to_yaw: float) -> float:
+	return wrapf(to_yaw - from_yaw, -PI, PI)
+
+
+## Pure native policy with stock-Godot mathematical parity. No scene writes.
+static func interpolate_yaw(from_yaw: float, to_yaw: float,
+		from_angular_velocity: float, to_angular_velocity: float,
+		snapshot_span: float, alpha: float, native_policy: Object = null) -> float:
+	if native_policy != null and native_policy.has_method("interpolate_yaw"):
+		return float(native_policy.call("interpolate_yaw",
+			from_yaw, to_yaw, from_angular_velocity,
+			to_angular_velocity, snapshot_span, alpha))
+	if not is_finite(from_yaw) or absf(from_yaw) > 10000.0:
+		return to_yaw if is_finite(to_yaw) and absf(to_yaw) <= 10000.0 else 0.0
+	if not is_finite(to_yaw) or absf(to_yaw) > 10000.0:
+		return from_yaw
+	var k: float = clampf(alpha if is_finite(alpha) else 0.0, 0.0, 1.0)
+	var turn: float = _yaw_delta(from_yaw, to_yaw)
+	if k <= 0.0 or absf(turn) <= 0.00001:
+		return from_yaw
+	if k >= 1.0:
+		# Equivalent to authoritative yaw modulo TAU without a seam jump.
+		return from_yaw + turn
+	var linear: float = from_yaw + turn * k
+	if not is_finite(snapshot_span) or snapshot_span <= 0.00001 \
+			or snapshot_span > MAX_SAMPLE_SECONDS or absf(turn) > 2.4 \
+			or not is_finite(from_angular_velocity) \
+			or not is_finite(to_angular_velocity) \
+			or absf(from_angular_velocity) > 1000.0 \
+			or absf(to_angular_velocity) > 1000.0:
+		return linear
+	var m0: float = turn * clampf(
+		from_angular_velocity * snapshot_span / turn, 0.0, 3.0)
+	var m1: float = turn * clampf(
+		to_angular_velocity * snapshot_span / turn, 0.0, 3.0)
+	var k2: float = k * k
+	var k3: float = k2 * k
+	var offset: float = (k3 - 2.0 * k2 + k) * m0 \
+		+ (-2.0 * k3 + 3.0 * k2) * turn + (k3 - k2) * m1
+	return from_yaw + clampf(offset, minf(0.0, turn), maxf(0.0, turn))
+
+
+## Four server snapshots refine the endpoints' angular velocities. Two
+## samples retain the original lerp_angle exactly, preserving low-bandwidth
+## and freshly spawned actor behavior. Neighbor yaw cannot span teleport
+## turns; old/inverted timestamps fail back to safe angular interpolation.
+static func sample_yaw(previous: Array, older: Array, newer: Array,
+		following: Array, alpha: float, native_policy: Object = null) -> float:
+	if older.size() < 3 or newer.size() < 3:
+		return 0.0
+	var a: float = float(older[2])
+	var b: float = float(newer[2])
+	if not is_finite(a) or absf(a) > 10000.0 \
+			or not is_finite(b) or absf(b) > 10000.0:
+		return interpolate_yaw(a, b, 0.0, 0.0, 0.1, alpha, native_policy)
+	var t: float = clampf(alpha if is_finite(alpha) else 0.0, 0.0, 1.0)
+	var t0: float = float(older[0])
+	var t1: float = float(newer[0])
+	var span: float = t1 - t0
+	var turn: float = _yaw_delta(a, b)
+	if not is_finite(span) or span <= 0.00001 or span > MAX_SAMPLE_SECONDS \
+			or absf(turn) > 2.4:
+		return lerp_angle(a, b, t)
+	var v: float = turn / span
+	var v0: float = v
+	var v1: float = v
+	var have_neighbor := false
+	if previous.size() >= 3:
+		var prev_t: float = float(previous[0])
+		var prev_angle: float = float(previous[2])
+		var prev_delta: float = _yaw_delta(prev_angle, a) if is_finite(prev_angle) else INF
+		var earlier_span: float = t1 - prev_t
+		if is_finite(prev_t) and prev_t < t0 \
+				and is_finite(earlier_span) and earlier_span > 0.00001 \
+				and earlier_span <= MAX_SAMPLE_SECONDS * 3.0 \
+				and absf(prev_angle) <= 10000.0 and absf(prev_delta) <= 2.4:
+			v0 = (prev_delta + turn) / earlier_span
+			have_neighbor = true
+	if following.size() >= 3:
+		var next_t: float = float(following[0])
+		var next_angle: float = float(following[2])
+		var next_delta: float = _yaw_delta(b, next_angle) if is_finite(next_angle) else INF
+		var later_span: float = next_t - t0
+		if is_finite(next_t) and next_t > t1 \
+				and is_finite(later_span) and later_span > 0.00001 \
+				and later_span <= MAX_SAMPLE_SECONDS * 3.0 \
+				and absf(next_angle) <= 10000.0 and absf(next_delta) <= 2.4:
+			v1 = (turn + next_delta) / later_span
+			have_neighbor = true
+	if not have_neighbor:
+		return lerp_angle(a, b, t)
+	return interpolate_yaw(a, b, v0, v1, span, t, native_policy)

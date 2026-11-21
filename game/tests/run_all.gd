@@ -60,6 +60,7 @@ const SUITES := [
 	"res://tests/test_audio_occlusion_envelope.gd",
 	"res://tests/test_animation_parity.gd",
 	"res://tests/test_network_snapshot_smoothing.gd",
+	"res://tests/test_snapshot_rotation_smoothing.gd",
 	"res://tests/test_snapshot_interest_grid.gd",
 	"res://tests/test_network_jitter_buffer.gd",
 	"res://tests/test_ui_parity.gd",

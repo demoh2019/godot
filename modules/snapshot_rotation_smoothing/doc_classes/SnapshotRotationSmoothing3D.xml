@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SnapshotRotationSmoothing3D" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Bounded shortest-arc Hermite rotation interpolation for network simulated proxies.</brief_description>
+	<description>
+		Pure 3D character-yaw smoothing inspired by Unreal Engine simulated-proxy NetworkSmoothingMode. It reconstructs turns between two authoritative server samples using optional angular velocities from neighboring samples, without extrapolation. The game owns arrival timing and histories; this class never changes a Node3D, physics or networking state.
+	</description>
+	<methods>
+		<method name="interpolate_yaw" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="from_yaw" type="float" />
+			<param index="1" name="to_yaw" type="float" />
+			<param index="2" name="from_angular_velocity" type="float" />
+			<param index="3" name="to_angular_velocity" type="float" />
+			<param index="4" name="snapshot_span" type="float" />
+			<param index="5" name="fraction" type="float" />
+			<description>
+				Returns the interpolated yaw on the shortest rotation arc. Fractions are clamped to [0, 1]; valid endpoint rotations are preserved modulo 2*pi, without seam jumps. Nonfinite/invalid angles fall back to the valid endpoint or zero. Turns above 2.4 radians, bad spans outside (0.00001, 0.5] seconds or nonfinite/unbounded angular velocities use a safe shortest-arc linear interpolation. Otherwise computes an endpoint-tangent Hermite cubic with directional slopes clamped to [0, 3] chords, and final angle clamped between unwrapped endpoints. No overshoot, future prediction, 360-degree wrap or gameplay state mutation. Values are in radians and seconds.
+			</description>
+		</method>
+	</methods>
+</class>
