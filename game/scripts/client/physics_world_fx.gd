@@ -56,4 +56,8 @@ func on_event(event: Dictionary, at: Vector3) -> void:
 
 
 func update(delta: float, player: Vector3) -> void:
+	# Same local viewer used for plant bending also controls non-authoritative
+	# Chaos-style rigid-body LOD. Server simulation is unchanged.
+	if debris != null:
+		debris.call("set_viewer_position", player)
 	plants.update(delta, player, PhysicsDebris.quality_level())

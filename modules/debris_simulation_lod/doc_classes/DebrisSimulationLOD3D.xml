@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DebrisSimulationLOD3D" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Deterministic distance and hysteresis LOD for cosmetic rigid-body debris.</brief_description>
+	<description>
+		Classifies non-authoritative cosmetic rigid-body fragments into simulated, frozen or retired tiers inspired by Unreal Engine Chaos Sleep and Disable fields. Pure data-only policy, with no simulation or side effects. The game decides how and when to freeze/unfreeze RigidBody3D nodes and reuse them.
+	</description>
+	<methods>
+		<method name="classify" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="distance_m" type="float" />
+			<param index="1" name="in_water" type="bool" />
+			<param index="2" name="previous_tier" type="int" />
+			<param index="3" name="simulate_radius_m" type="float" default="24.0" />
+			<param index="4" name="retire_radius_m" type="float" default="56.0" />
+			<param index="5" name="hysteresis_m" type="float" default="2.0" />
+			<description>
+				Returns 0 (simulate), 1 (freeze) or 2 (retire beyond the retirement radius), or -1 on invalid input. New fragments freeze when distance reaches simulate radius plus hysteresis; frozen fragments unfreeze when distance is at most simulate radius minus hysteresis. While within retirement distance, water forces active simulation so floating debris cannot get permanently frozen. All numeric inputs must be finite, with distance in 0..1e7 m, simulate radius 1..10000 m, retire radius at most 20000 m and greater than simulate radius plus hysteresis, hysteresis 0..10 m and below simulate radius, and previous tier either 0 or 1. Uses no rendering, physics, nodes, clock, game networking or global mutable state.
+			</description>
+		</method>
+	</methods>
+</class>

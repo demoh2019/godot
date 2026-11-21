@@ -1,0 +1,96 @@
+name: Native Chaos-style debris simulation LOD and Albion After
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/debris_simulation_lod/**'
+      - 'game/scripts/client/physics_debris.gd'
+      - 'game/scripts/client/physics_world_fx.gd'
+      - 'game/scripts/client/debris_simulation_lod.gd'
+      - 'game/tests/test_debris_simulation_lod.gd'
+      - 'game/tests/run_debris_simulation_lod.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_debris_simulation_lod_contract.py'
+      - '.github/workflows/native-debris-simulation-lod.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/debris_simulation_lod/**'
+      - 'game/scripts/client/physics_debris.gd'
+      - 'game/scripts/client/physics_world_fx.gd'
+      - 'game/scripts/client/debris_simulation_lod.gd'
+      - 'game/tests/test_debris_simulation_lod.gd'
+      - 'game/tests/run_debris_simulation_lod.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_debris_simulation_lod_contract.py'
+      - '.github/workflows/native-debris-simulation-lod.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source contracts (not a native substitute)
+        run: python3 -m unittest tests/scene/test_debris_simulation_lod_contract.py -v
+
+  native-game:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: C++ native cosmetic debris simulation LOD doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*DebrisSimulationLOD3D*" --no-colors 2>&1 | tee debris-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' debris-native.log; then exit 1; fi
+      - name: Import Albion After game
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee debris-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' debris-import.log; then exit 1; fi
+      - name: Native and portable 3D debris game regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_debris_simulation_lod.gd 2>&1 | tee debris-game.log
+          grep -E '^DEBRIS LOD TOTAL: [0-9]+ checks, 0 failures$' debris-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' debris-game.log; then exit 1; fi
+      - name: Full Albion After headless regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee debris-full.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' debris-full.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' debris-full.log; then exit 1; fi
+      - name: Archive regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-debris-simulation-lod
+          if-no-files-found: ignore
+          path: |
+            debris-native.log
+            debris-import.log
+            debris-game.log
+            debris-full.log
