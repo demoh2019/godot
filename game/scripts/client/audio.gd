@@ -8,15 +8,25 @@ const AudioMix = preload("res://scripts/client/audio_mix.gd")
 const AudioSurfaces = preload("res://scripts/client/audio_surfaces.gd")
 const AudioVoices = preload("res://scripts/client/audio_voices.gd")
 const AudioSpatial = preload("res://scripts/client/audio_spatial.gd")
+const AudioEmission = preload("res://scripts/client/audio_spatial_emission.gd")
 const AudioDucking = preload("res://scripts/client/audio_ducking.gd")
 const AudioMixSnapshots = preload("res://scripts/client/audio_mix_snapshots.gd")
 const AudioAmbient = preload("res://scripts/client/audio_ambient.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 ## Optional engine SoundConcurrencyManager (null on a binary without the gameplay_fx module).
 const CONCURRENCY_GROUPS := {"enemy_hurt": 4, "coin": 3, "blaster": 4, "blaster_repeater": 4, "break": 3}
+# Coalesce only low-priority repeated local foley; never suppress shots,
+# kill confirmation, elite warning, dialogue or music.
+const SPATIAL_RETRIGGER := {"enemy_hurt": 0.075, "break": 0.095, "coin": 0.09}
+const SPATIAL_MERGE_RADIUS := 3.5
+const SPATIAL_MAX_DISTANCE := 90.0
 var _concurrency: Node = null
 var _concurrency_tried := false
 var _native_voice_admission: Object = null
+var _native_spatial_emission: Object = null
+var _last_spatial_emissions: Dictionary = {} # Only the three fixed sound names.
+var _listener_ready: bool = false
+var _spatial_emission_rejections: int = 0
 var _voice_hold_rejections: int = 0
 var _sfx_bus := -1
 var _sfx_lowpass := -1
@@ -71,6 +81,7 @@ func _ready() -> void:
 	_native_duck = EngineFeatures.make("AudioDuckMix")
 	_native_mix_snapshots = EngineFeatures.make("AudioMixSnapshotController")
 	_native_voice_admission = EngineFeatures.make("AudioVoiceAdmissionPlanner")
+	_native_spatial_emission = EngineFeatures.make("SpatialSoundEventPolicy")
 	_ambience = AudioStreamPlayer.new()
 	_ambience.bus = "Ambience"
 	_ambience.stream = Assets.sound("ambience")
@@ -238,8 +249,41 @@ func get_voice_hold_rejections() -> int:
 	return _voice_hold_rejections
 
 
+func get_spatial_emission_rejections() -> int:
+	return _spatial_emission_rejections
+
+
+## Early, data-only admission before sound resource resolution, allocation,
+## sound-voice policy, physics queries or audio-server work.
+func _should_emit_spatial(name: String, at: Vector3, now: float) -> bool:
+	var last_position := Vector3.INF
+	var last_time := -1.0
+	var window: float = float(SPATIAL_RETRIGGER.get(name, 0.0))
+	if window > 0.0:
+		var recent: Dictionary = _last_spatial_emissions.get(name, {})
+		last_position = recent.get("at", Vector3.INF)
+		last_time = float(recent.get("time", -1.0))
+	if _native_spatial_emission != null and _native_spatial_emission.has_method("should_emit"):
+		return bool(_native_spatial_emission.call("should_emit", _listener, at,
+			last_position, now, last_time, window, SPATIAL_MERGE_RADIUS,
+			SPATIAL_MAX_DISTANCE, _listener_ready))
+	return AudioEmission.should_emit(_listener, at, last_position, now,
+		last_time, window, SPATIAL_MERGE_RADIUS, SPATIAL_MAX_DISTANCE,
+		_listener_ready)
+
+
+func _record_spatial_emission(name: String, at: Vector3, now: float) -> void:
+	if _listener_ready and SPATIAL_RETRIGGER.has(name):
+		# Only a successfully started voice may block a following event.
+		_last_spatial_emissions[name] = {"at": at, "time": now}
+
+
 func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> void:
 	if not enabled:
+		return
+	var now: float = Time.get_ticks_msec() / 1000.0
+	if not _should_emit_spatial(sound_name, position, now):
+		_spatial_emission_rejections += 1
 		return
 	var stream := Assets.sound(sound_name)
 	if stream == null:
@@ -248,7 +292,6 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	var distance := position.distance_to(_listener)
 	var loudness := AudioVoices.audibility(volume_db, distance, 14.0)
 	var priority: int = AudioVoices.priority_for(sound_name)
-	var now := Time.get_ticks_msec() / 1000.0
 	var snapshot: Array = []
 	for v in _voices:
 		snapshot.append({"name": v["name"], "audibility": v["audibility"],
@@ -314,6 +357,7 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 		_voices.erase(record)
 		player.queue_free())
 	player.play()
+	_record_spatial_emission(sound_name, position, now)
 
 
 ## Scene physics is read only during physics ticks. This detects wooden
@@ -502,6 +546,7 @@ static func _apply_bus_gain(bus: String, gain_db: float) -> void:
 func update_environment(listener: Vector3, ground_height: Callable, underground: bool, biome: String,
 		daylight: float, storm: float, wind: float, covered: bool, speed: float, delta: float) -> void:
 	_listener = listener
+	_listener_ready = listener.is_finite()
 	_ground = ground_height
 	_humidity = clampf(storm, 0.0, 1.0)
 	# Listener low-pass on the SFX bus (underground / storm).

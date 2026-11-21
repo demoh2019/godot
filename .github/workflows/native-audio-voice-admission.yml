@@ -2,13 +2,20 @@ name: Native audio voice admission and Albion After sound tests
 
 on:
   pull_request:
+    branches: [develop]
     paths:
       - 'scene/main/audio_voice_admission_planner.*'
       - 'scene/register_scene_types.cpp'
       - 'tests/scene/test_audio_voice_admission_planner.cpp'
+      - 'modules/gameplay_fx/**'
       - 'game/scripts/client/audio.gd'
       - 'game/scripts/client/audio_voices.gd'
+      - 'game/scripts/client/audio_spatial_emission.gd'
       - 'game/tests/test_audio_voice_admission.gd'
+      - 'game/tests/test_spatial_sound_event_policy.gd'
+      - 'game/tests/run_spatial_sound_event_policy.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_spatial_sound_event_policy_contract.py'
       - '.github/workflows/native-audio-voice-admission.yml'
   push:
     branches: [develop]
@@ -16,9 +23,15 @@ on:
       - 'scene/main/audio_voice_admission_planner.*'
       - 'scene/register_scene_types.cpp'
       - 'tests/scene/test_audio_voice_admission_planner.cpp'
+      - 'modules/gameplay_fx/**'
       - 'game/scripts/client/audio.gd'
       - 'game/scripts/client/audio_voices.gd'
+      - 'game/scripts/client/audio_spatial_emission.gd'
       - 'game/tests/test_audio_voice_admission.gd'
+      - 'game/tests/test_spatial_sound_event_policy.gd'
+      - 'game/tests/run_spatial_sound_event_policy.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_spatial_sound_event_policy_contract.py'
       - '.github/workflows/native-audio-voice-admission.yml'
   workflow_dispatch:
 
@@ -31,8 +44,12 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Spatial sound native/game source contracts
+        run: python3 -m unittest tests/scene/test_spatial_sound_event_policy_contract.py -v
       - uses: ./.github/actions/godot-deps
-      - name: Build custom engine with native doctest
+      - name: Build native Cgame editor with doctests
         uses: ./.github/actions/godot-build
         with:
           platform: linuxbsd
@@ -44,21 +61,45 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 180s "$BIN" --headless --test --test-case="[AudioVoiceAdmissionPlanner]*" --no-colors 2>&1 | tee native-audio-admission.log
-      - name: Import and test Albion After
+      - name: Native spatial retrigger regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*SpatialSoundEventPolicy*" --no-colors 2>&1 | tee native-spatial-emission.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' native-spatial-emission.log; then exit 1; fi
+      - name: Import Albion After
         shell: bash
         run: |
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee native-audio-import.log
-          timeout 360s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee native-audio-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' native-audio-import.log; then exit 1; fi
+      - name: Focused spatial sound and native fallback tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_spatial_sound_event_policy.gd 2>&1 | tee native-spatial-emission-game.log
+          grep -E '^SPATIAL SOUND TOTAL: [0-9]+ checks, 0 failures$' native-spatial-emission-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-spatial-emission-game.log; then exit 1; fi
+      - name: Full Albion After gameplay regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee native-audio-game.log
           grep -E '^TOTAL [0-9]+ checks, 0 failures$' native-audio-game.log
-          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-audio-import.log native-audio-game.log; then exit 1; fi
-      - uses: actions/upload-artifact@v4
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-audio-game.log; then exit 1; fi
+      - name: Upload native audio regression logs
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: native-audio-voice-admission
           if-no-files-found: ignore
           path: |
             native-audio-admission.log
+            native-spatial-emission.log
             native-audio-import.log
+            native-spatial-emission-game.log
             native-audio-game.log

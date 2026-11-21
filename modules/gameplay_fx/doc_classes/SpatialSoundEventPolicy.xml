@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SpatialSoundEventPolicy" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Early spatial distance and retrigger-time admission for repeated cosmetic 3D sound events.</brief_description>
+	<description>
+		Unreal Sound Concurrency-inspired pure policy that can reject duplicate sounds in a small world area before allocating AudioStreamPlayer3D nodes or performing expensive obstruction checks. The caller owns the per-sound last successfully emitted time and location; this policy has no mutable global history, no AudioServer calls and no changes to authoritative game events. Sound concurrency voice limits are still applied separately.
+	</description>
+	<methods>
+		<method name="should_emit" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="listener" type="Vector3" />
+			<param index="1" name="source" type="Vector3" />
+			<param index="2" name="previous_source" type="Vector3" />
+			<param index="3" name="now_seconds" type="float" />
+			<param index="4" name="last_seconds" type="float" />
+			<param index="5" name="retrigger_seconds" type="float" />
+			<param index="6" name="merge_radius" type="float" />
+			<param index="7" name="max_distance" type="float" />
+			<param index="8" name="listener_ready" type="bool" default="true" />
+			<description>
+				Returns false for a non-finite source position, events beyond max_distance plus 2 m when a listener is known, or repeat events from within merge_radius strictly before retrigger_seconds have elapsed. Negative last_seconds means no previous event. Invalid optional timing/radius parameters fail open, as does a missing listener. The game only applies positive retrigger windows to low-priority repeated foley and retains weapon/killsounds without this suppression.
+			</description>
+		</method>
+	</methods>
+</class>

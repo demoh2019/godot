@@ -10,6 +10,7 @@ def get_doc_classes():
     return [
         "SoundConcurrency",
         "SoundConcurrencyManager",
+        "SpatialSoundEventPolicy",
         "SoundPropagation",
         "RadialForceField3D",
         "GameplayEffectTimeline",
